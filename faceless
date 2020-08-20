@@ -1,0 +1,159 @@
+#!/usr/bin/python3
+
+import os
+import sys
+import time
+from future import standard_library
+standard_library.install_aliases()
+from subprocess import getoutput
+import signal
+from stem import Signal
+from stem.control import Controller
+
+class bcolors:
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    RED = '\033[31m'
+    YELLOW = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    BGRED = '\033[41m'
+    WHITE = '\033[37m'
+
+def shutdown():
+    print ("")
+    print (bcolors.BGRED + bcolors.WHITE + "Exiting faceless" + bcolors.ENDC +"\n\n")
+    sys.exit()
+
+def sigint_handler(signum, frame):
+    print ('\n Force Shutdown !!!')
+    shutdown()
+
+def logo():
+    os.system("clear")
+    print (bcolors.RED + bcolors.BOLD)
+    print ("""
+     *******************************************
+    |   FACELESS -> A VPN based on TOR Network   |
+     *******************************************
+     """)
+    print (bcolors.ENDC)
+
+def usage():
+    logo()
+    print (bcolors.GREEN + bcolors.BOLD)
+    print("""
+     ===========================================================
+    |  Type:                                                    |
+    |     faceless start                  -> Start TOR VPN      |
+    |     faceless switch                 -> Switch TOR IP      |
+    |     faceless stop                   -> Stop TOR VPN       |
+     ===========================================================
+    """)
+    print (bcolors.ENDC)
+    sys.exit()
+
+signal.signal(signal.SIGINT, sigint_handler)
+
+TorrcCfgString = ("""
+
+## Faceless Configuration
+VirtualAddrNetwork 10.0.0.0/10
+AutomapHostsOnResolve 1
+TransPort 9040
+DNSPort 53
+ControlPort 9051
+
+""")
+
+resolvString = "nameserver 127.0.0.1"
+
+Torrc = "/etc/tor/torrc"
+resolv = "/etc/resolv.conf"
+
+def start_faceless():
+	if TorrcCfgString in open(Torrc).read():
+	    print (bcolors.BLUE +" File is already configured" + bcolors.ENDC)
+	else:
+		with open(Torrc, "a") as myfile:
+			myfile.write(TorrcCfgString)
+			print (bcolors.GREEN+"[Configuration Done]"+bcolors.ENDC)
+	if resolvString in open(resolv).read():
+	    print (bcolors.BLUE + " DNS File Already Configured" + bcolors.ENDC)
+	else:
+		with open(resolv, "w") as myfile:
+			print (bcolors.BLUE + " Configuring DNS file.. " + bcolors.ENDC),
+			myfile.write(resolvString)
+			print (bcolors.GREEN+"[DNS file is configured]"+bcolors.ENDC)
+	print (bcolors.BLUE + " Starting TOR service.. " + bcolors.ENDC),
+	os.system("service tor start")
+	print (bcolors.GREEN+"[TOR is Running]"+bcolors.ENDC)
+	print (bcolors.BLUE + " Setting up Iptables rules" + bcolors.ENDC),
+	iptables_rules = ("""
+	NON_TOR="192.168.1.0/24 192.168.0.0/24"
+	TOR_UID=%s
+	TRANS_PORT="9040"
+	iptables -F
+	iptables -t nat -F
+	iptables -t nat -A OUTPUT -m owner --uid-owner $TOR_UID -j RETURN
+	iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 53
+	for NET in $NON_TOR 127.0.0.0/9 127.128.0.0/10; do
+	 iptables -t nat -A OUTPUT -d $NET -j RETURN
+	done
+	iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports $TRANS_PORT
+	iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+	for NET in $NON_TOR 127.0.0.0/8; do
+	 iptables -A OUTPUT -d $NET -j ACCEPT
+	done
+	iptables -A OUTPUT -m owner --uid-owner $TOR_UID -j ACCEPT
+	iptables -A OUTPUT -j REJECT
+	""")%(getoutput("id -ur debian-tor"))
+	os.system(iptables_rules)
+	print (bcolors.GREEN+"[Your Iptables are configured]"+bcolors.ENDC)
+
+def stop_faceless():
+	print (bcolors.RED + "STOPPING faceless" + bcolors.ENDC)
+	print (bcolors.BLUE + " Flushing Iptables, Resetting to Default" + bcolors.ENDC),
+	IpFlush = ("""
+	iptables -P INPUT ACCEPT
+	iptables -P FORWARD ACCEPT
+	iptables -P OUTPUT ACCEPT
+	iptables -t nat -F
+	iptables -t mangle -F
+	iptables -F
+	iptables -X
+	""")
+	os.system(IpFlush)
+	print (bcolors.GREEN+"[Flushed Iptables]"+bcolors.ENDC)
+	print (bcolors.BLUE + " Restarting Network manager..." + bcolors.ENDC),
+	os.system("service network-manager restart")
+	print (bcolors.GREEN+"[Network Restarted]"+bcolors.ENDC)
+
+def switch_faceless():
+	print (bcolors.YELLOW + " Please wait..." + bcolors.ENDC)
+	time.sleep(7)
+	print (bcolors.BLUE + " Requesting new circuit..." + bcolors.ENDC),
+	with Controller.from_port(port = 9051) as controller:
+  		controller.authenticate()
+  		controller.signal(Signal.NEWNYM)
+	print (bcolors.GREEN+"[New Network Established]"+bcolors.ENDC)
+
+def faceless():
+    arg = sys.argv[1:]
+    if len(arg)!=1:
+        usage()
+    elif sys.argv[1] == "start":
+        logo()
+        start_faceless()
+    elif sys.argv[1] == "stop":
+        logo()
+        stop_faceless()
+    elif sys.argv[1] == "switch":
+        logo()
+        switch_faceless()
+    else:
+        usage()
+
+if __name__ == '__main__':
+    faceless()
