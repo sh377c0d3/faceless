@@ -1,7 +1,7 @@
 # faceless
 VPN based on TOR Network for your Linux based distro
 
-## Make sure your Linux has tor installed
+## Make sure your Linux distro has tor installed
 
 # Steps to install faceless
 
